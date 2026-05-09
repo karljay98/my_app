@@ -2,18 +2,15 @@ name: CI-CD Pipeline
 
 on:
   push:
-    branches:
-      - dev
-      - main
+    branches: [dev, main]
 
-permissions:     
+permissions:      
   id-token: write
   contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -22,59 +19,42 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'npm' # Speeds up subsequent runs
 
-      # - name: Install dependencies
-      #   run: npm install
+      - name: Install & Build
+        run: |
+          npm ci
+          npm run build --if-present
 
-      # - name: Build app
-      #   run: npm run build
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: dist/ # Change this to your actual build folder (dist, build, etc.)
+
+  deploy:
+    # This single job handles both dev and prod using a matrix or environment selection
+    name: Deploy to ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
     
-
-
-  deploy-dev:
-    name: Deploy to Dev
-    if: github.ref == 'refs/heads/dev'
-    needs: build
-    runs-on: ubuntu-latest
-    environment: dev
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Download Build Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-output
 
       - name: Azure Login
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_DEV }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          # client-secret only needed if NOT using OIDC
+          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }} 
 
-      - name: Deploy to Dev
+      - name: Deploy
         run: |
-          az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_DEV }}
-          echo "Deploying to DEV..."
-
-  deploy-prod:
-    name: Deploy to Prod
-    if: github.ref == 'refs/heads/main'
-    needs: build
-    runs-on: ubuntu-latest
-    environment: prod
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_PROD }}
-
-      - name: Deploy to Prod
-        run: |
-          az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_PROD }}
-          echo "Deploying to PROD..."
+          echo "Deploying to ${{ github.ref_name }}..."
+          # Add your actual deployment command here (e.g., az webapp deploy)
